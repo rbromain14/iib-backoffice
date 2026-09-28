@@ -2,9 +2,13 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 
 // Palette alignée sur l'app IIB Pilot
-const C = { ink: "#16202E", paper: "#F7F6F3", card: "#FFFFFF", line: "#E7E4DE", amber: "#D98A29", amberSoft: "#FBEFD9", green: "#2F9E6B", greenSoft: "#E3F3EC", red: "#D1495B", redSoft: "#FBE6E9", slate: "#5B6675" };
+const C = { ink: "#16202E", paper: "#F7F6F3", card: "#FFFFFF", line: "#E7E4DE", amber: "#D98A29", amberSoft: "#FBEFD9", green: "#2F9E6B", greenSoft: "#E3F3EC", red: "#D1495B", redSoft: "#FBE6E9", blue: "#3B7BB5", blueSoft: "#E4EEF6", slate: "#5B6675" };
 const UI = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const ROLES = [["owner", "Propriétaire"], ["admin", "Admin"], ["editor", "Éditeur"], ["viewer", "Lecture"]];
+const PLANS = [["trial", "Essai"], ["solo", "Solo"], ["pro", "Pro"], ["team", "Team"]];
+const STATUSES = [["trial", "Essai"], ["active", "Actif"], ["past_due", "Impayé"], ["canceled", "Annulé"]];
+const PRICE = { trial: 0, solo: 19, pro: 49, team: 99 }; // €/mois (indicatif, ajustable)
+
 const inp = { fontFamily: UI, display: "block", width: "100%", boxSizing: "border-box", padding: "10px 12px", margin: "6px 0", border: `1px solid ${C.line}`, borderRadius: 10, fontSize: 14, outline: "none" };
 const btn = { fontFamily: UI, border: "none", background: C.amber, color: "#fff", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontWeight: 700, fontSize: 14 };
 const btnGhost = { fontFamily: UI, border: `1px solid ${C.line}`, background: "#fff", color: C.ink, borderRadius: 10, padding: "8px 14px", cursor: "pointer", fontWeight: 600, fontSize: 13 };
@@ -29,10 +33,8 @@ function Login() {
 }
 
 function MembersPanel({ orgId }) {
-  const [members, setMembers] = useState(null);
-  const [invites, setInvites] = useState([]);
-  const [email, setEmail] = useState(""); const [role, setRole] = useState("editor");
-  const [msg, setMsg] = useState("");
+  const [members, setMembers] = useState(null); const [invites, setInvites] = useState([]);
+  const [email, setEmail] = useState(""); const [role, setRole] = useState("editor"); const [msg, setMsg] = useState("");
   const load = async () => {
     const { data: mems } = await supabase.from("memberships").select("user_id,role").eq("org_id", orgId);
     const ids = (mems || []).map((m) => m.user_id);
@@ -43,12 +45,7 @@ function MembersPanel({ orgId }) {
     setInvites(inv || []);
   };
   useEffect(() => { load(); }, [orgId]);
-  const invite = async () => {
-    if (!email.trim()) return; setMsg("");
-    const { error } = await supabase.from("invitations").insert({ org_id: orgId, email: email.trim().toLowerCase(), role });
-    if (error) { setMsg(error.message); return; }
-    setEmail(""); load();
-  };
+  const invite = async () => { if (!email.trim()) return; setMsg(""); const { error } = await supabase.from("invitations").insert({ org_id: orgId, email: email.trim().toLowerCase(), role }); if (error) { setMsg(error.message); return; } setEmail(""); load(); };
   const changeRole = async (uid, r) => { const { error } = await supabase.from("memberships").update({ role: r }).eq("org_id", orgId).eq("user_id", uid); if (error) setMsg(error.message); else load(); };
   const removeMember = async (uid) => { const { error } = await supabase.from("memberships").delete().eq("org_id", orgId).eq("user_id", uid); if (error) setMsg(error.message); else load(); };
   const cancelInv = async (id) => { await supabase.from("invitations").delete().eq("id", id); load(); };
@@ -81,31 +78,39 @@ function MembersPanel({ orgId }) {
         <select value={role} onChange={(e) => setRole(e.target.value)} style={sel}>{ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <button onClick={invite} style={btnGhost}>Inviter</button>
       </div>
-      <div style={{ color: C.slate, fontSize: 11, marginTop: 6 }}>L'invité rejoint la société à sa prochaine connexion (nouveau compte ou existant).</div>
     </div>
   );
 }
 
-function OrgRow({ o, onChange }) {
+function OrgRow({ o, onChange, onDelete }) {
   const [name, setName] = useState(o.name || "");
-  const [open, setOpen] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [open, setOpen] = useState(false); const [msg, setMsg] = useState("");
   const mods = o.modules || { reno: true, rental: true };
-  const toggle = async (key) => { const next = { ...mods, [key]: mods[key] === false ? true : false }; const { error } = await supabase.from("organizations").update({ modules: next }).eq("id", o.id); if (error) { setMsg(error.message); return; } onChange({ ...o, modules: next }); };
-  const saveName = async () => { if (name === o.name) return; const { error } = await supabase.from("organizations").update({ name }).eq("id", o.id); if (error) { setMsg(error.message); return; } onChange({ ...o, name }); };
+  const patch = async (fields) => { const { error } = await supabase.from("organizations").update(fields).eq("id", o.id); if (error) { setMsg(error.message); return false; } onChange({ ...o, ...fields }); return true; };
+  const toggle = (key) => patch({ modules: { ...mods, [key]: mods[key] === false ? true : false } });
+  const saveName = () => { if (name !== o.name) patch({ name }); };
+  const del = async () => {
+    if (!window.confirm(`Supprimer la société « ${o.name} » et TOUTES ses données (biens, projets, membres) ? Action irréversible.`)) return;
+    const { error } = await supabase.from("organizations").delete().eq("id", o.id);
+    if (error) { setMsg(error.message); return; } onDelete(o.id);
+  };
   const chip = (on) => ({ fontFamily: UI, padding: "6px 12px", borderRadius: 8, border: `1px solid ${on ? C.green : C.line}`, cursor: "pointer", fontWeight: 600, fontSize: 12, background: on ? C.greenSoft : "#fff", color: on ? C.green : C.slate });
+  const stCol = { trial: C.blue, active: C.green, past_due: C.amber, canceled: C.red }[o.status] || C.slate;
   return (
     <div style={{ padding: "12px 4px", borderTop: `1px solid #EEF0F2` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} style={{ fontFamily: UI, fontWeight: 600, fontSize: 14, color: C.ink, border: "1px solid transparent", borderRadius: 6, padding: "2px 4px", width: "100%", maxWidth: 320 }} />
-          <div style={{ color: C.slate, fontSize: 11 }}>{o.members} membre(s) · créée le {new Date(o.created_at).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: C.slate, fontSize: 11 }}>{o.members} membre(s) · créée le {new Date(o.created_at).toLocaleDateString("fr-FR")} · <span style={{ color: stCol, fontWeight: 700 }}>{(STATUSES.find((s) => s[0] === o.status) || ["", o.status])[1]}</span></div>
           {msg && <div style={{ color: C.red, fontSize: 11 }}>{msg}</div>}
         </div>
-        <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
-          <button onClick={() => toggle("reno")} style={chip(mods.reno !== false)}>Rénovation {mods.reno !== false ? "✓" : "✕"}</button>
-          <button onClick={() => toggle("rental")} style={chip(mods.rental !== false)}>Location {mods.rental !== false ? "✓" : "✕"}</button>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center", flexWrap: "wrap" }}>
+          <select value={o.plan || "trial"} onChange={(e) => patch({ plan: e.target.value })} style={sel} title="Formule">{PLANS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select value={o.status || "trial"} onChange={(e) => patch({ status: e.target.value })} style={sel} title="Statut d'abonnement">{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <button onClick={() => toggle("reno")} style={chip(mods.reno !== false)}>Réno {mods.reno !== false ? "✓" : "✕"}</button>
+          <button onClick={() => toggle("rental")} style={chip(mods.rental !== false)}>Loc. {mods.rental !== false ? "✓" : "✕"}</button>
           <button onClick={() => setOpen(!open)} style={btnGhost}>{open ? "Fermer" : "Membres"}</button>
+          <button onClick={del} title="Supprimer la société" style={{ border: `1px solid ${C.redSoft}`, background: C.redSoft, color: C.red, borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontWeight: 700 }}>🗑</button>
         </div>
       </div>
       {open && <MembersPanel orgId={o.id} />}
@@ -113,18 +118,25 @@ function OrgRow({ o, onChange }) {
   );
 }
 
+function Stat({ label, value, color }) {
+  return <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 16px", minWidth: 140, flex: 1 }}>
+    <div style={{ fontSize: 10, textTransform: "uppercase", color: C.slate }}>{label}</div>
+    <div style={{ fontSize: 22, fontWeight: 700, color: color || C.ink, marginTop: 2 }}>{value}</div>
+  </div>;
+}
+
 function Console({ email }) {
-  const [orgs, setOrgs] = useState(null);
-  const [q, setQ] = useState(""); const [msg, setMsg] = useState("");
+  const [orgs, setOrgs] = useState(null); const [q, setQ] = useState(""); const [msg, setMsg] = useState("");
   const load = async () => { const { data, error } = await supabase.from("org_overview").select("*").order("created_at", { ascending: true }); if (error) setMsg(error.message); else setOrgs(data || []); };
   useEffect(() => { load(); }, []);
-  const createOrg = async () => {
-    const nom = window.prompt("Nom de la nouvelle société :", ""); if (!nom) return;
-    const { error } = await supabase.from("organizations").insert({ name: nom.trim() });
-    if (error) { setMsg(error.message); return; } load();
-  };
+  const createOrg = async () => { const nom = window.prompt("Nom de la nouvelle société :", ""); if (!nom) return; const { error } = await supabase.from("organizations").insert({ name: nom.trim() }); if (error) { setMsg(error.message); return; } load(); };
   const filtered = (orgs || []).filter((o) => !q || (o.name || "").toLowerCase().includes(q.toLowerCase()));
   const upd = (o) => setOrgs((os) => os.map((x) => (x.id === o.id ? { ...x, ...o } : x)));
+  const removed = (id) => setOrgs((os) => os.filter((x) => x.id !== id));
+  const total = (orgs || []).length;
+  const actives = (orgs || []).filter((o) => o.status === "active").length;
+  const essais = (orgs || []).filter((o) => o.status === "trial").length;
+  const mrr = (orgs || []).filter((o) => o.status === "active").reduce((s, o) => s + (PRICE[o.plan] || 0), 0);
   return (
     <div style={{ fontFamily: UI, minHeight: "100vh", background: C.paper }}>
       <div style={{ background: C.ink, color: "#fff", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -134,7 +146,13 @@ function Console({ email }) {
           <button onClick={() => supabase.auth.signOut()} style={{ border: "none", background: "rgba(255,255,255,.18)", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontWeight: 600 }}>Se déconnecter</button>
         </div>
       </div>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
+      <div style={{ maxWidth: 960, margin: "0 auto", padding: 24 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+          <Stat label="Sociétés" value={total} />
+          <Stat label="Actives" value={actives} color={C.green} />
+          <Stat label="En essai" value={essais} color={C.blue} />
+          <Stat label="MRR estimé" value={`${mrr} €`} color={C.amber} />
+        </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: C.ink }}>Sociétés {orgs ? `(${orgs.length})` : ""}</div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -146,9 +164,9 @@ function Console({ email }) {
         <div style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 14, padding: "4px 16px 16px" }}>
           {!orgs && <div style={{ color: C.slate, padding: 16 }}>Chargement…</div>}
           {orgs && filtered.length === 0 && <div style={{ color: C.slate, padding: 16 }}>Aucune société.</div>}
-          {filtered.map((o) => <OrgRow key={o.id} o={o} onChange={upd} />)}
+          {filtered.map((o) => <OrgRow key={o.id} o={o} onChange={upd} onDelete={removed} />)}
         </div>
-        <div style={{ color: C.slate, fontSize: 12, marginTop: 12 }}>Crée une société, active ses modules (Rénovation / Location) et gère ses membres. Les changements de modules sont visibles après rechargement de l'app côté utilisateur.</div>
+        <div style={{ color: C.slate, fontSize: 12, marginTop: 12 }}>Formule et statut sont manuels pour l'instant ; ils seront pilotés automatiquement par Stripe une fois l'intégration en place. Le MRR estimé additionne les sociétés « Actives » selon leur formule.</div>
       </div>
     </div>
   );
