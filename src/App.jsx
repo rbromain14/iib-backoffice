@@ -82,9 +82,42 @@ function MembersPanel({ orgId }) {
   );
 }
 
+function InfoPanel({ orgId, onSaved }) {
+  const [f, setF] = useState(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { (async () => { const { data } = await supabase.from("organizations").select("name,contact_name,contact_email,phone,address,country,trial_ends_at,notes").eq("id", orgId).maybeSingle(); setF(data || {}); })(); }, [orgId]);
+  if (!f) return <div style={{ background: C.paper, borderRadius: 10, padding: 12, marginTop: 8, color: C.slate, fontSize: 13 }}>Chargement…</div>;
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const save = async () => {
+    setMsg("");
+    const { error } = await supabase.from("organizations").update({ name: f.name, contact_name: f.contact_name, contact_email: f.contact_email, phone: f.phone, address: f.address, country: f.country, trial_ends_at: f.trial_ends_at || null, notes: f.notes }).eq("id", orgId);
+    if (error) setMsg(error.message); else { setMsg("Enregistré ✓"); if (onSaved) onSaved(f.name); }
+  };
+  const F = (label, k, type = "text") => (
+    <label style={{ display: "block", fontSize: 12 }}><span style={{ color: C.slate }}>{label}</span>
+      <input type={type} value={f[k] || ""} onChange={(e) => set(k, e.target.value)} style={{ ...inp, margin: "2px 0 0" }} /></label>
+  );
+  return (
+    <div style={{ background: C.paper, borderRadius: 10, padding: 12, marginTop: 8 }}>
+      {msg && <div style={{ color: msg.includes("✓") ? C.green : C.red, fontSize: 12, marginBottom: 6 }}>{msg}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div style={{ gridColumn: "1 / -1" }}>{F("Nom de la société", "name")}</div>
+        {F("Contact (personne)", "contact_name")}
+        {F("E-mail du contact", "contact_email", "email")}
+        {F("Téléphone", "phone")}
+        {F("Pays", "country")}
+        <div style={{ gridColumn: "1 / -1" }}>{F("Adresse", "address")}</div>
+        {F("Fin d'essai", "trial_ends_at", "date")}
+        <div style={{ gridColumn: "1 / -1" }}><label style={{ display: "block", fontSize: 12 }}><span style={{ color: C.slate }}>Notes</span>
+          <textarea value={f.notes || ""} onChange={(e) => set("notes", e.target.value)} style={{ ...inp, margin: "2px 0 0", minHeight: 56 }} /></label></div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><button onClick={save} style={btn}>Enregistrer</button></div>
+    </div>
+  );
+}
 function OrgRow({ o, onChange, onDelete }) {
   const [name, setName] = useState(o.name || "");
-  const [open, setOpen] = useState(false); const [msg, setMsg] = useState("");
+  const [open, setOpen] = useState(false); const [openInfo, setOpenInfo] = useState(false); const [msg, setMsg] = useState("");
   const mods = o.modules || { reno: true, rental: true };
   const patch = async (fields) => { const { error } = await supabase.from("organizations").update(fields).eq("id", o.id); if (error) { setMsg(error.message); return false; } onChange({ ...o, ...fields }); return true; };
   const toggle = (key) => patch({ modules: { ...mods, [key]: mods[key] === false ? true : false } });
@@ -109,10 +142,12 @@ function OrgRow({ o, onChange, onDelete }) {
           <select value={o.status || "trial"} onChange={(e) => patch({ status: e.target.value })} style={sel} title="Statut d'abonnement">{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <button onClick={() => toggle("reno")} style={chip(mods.reno !== false)}>Réno {mods.reno !== false ? "✓" : "✕"}</button>
           <button onClick={() => toggle("rental")} style={chip(mods.rental !== false)}>Loc. {mods.rental !== false ? "✓" : "✕"}</button>
+          <button onClick={() => setOpenInfo(!openInfo)} style={btnGhost}>{openInfo ? "Fermer" : "Infos"}</button>
           <button onClick={() => setOpen(!open)} style={btnGhost}>{open ? "Fermer" : "Membres"}</button>
           <button onClick={del} title="Supprimer la société" style={{ border: `1px solid ${C.redSoft}`, background: C.redSoft, color: C.red, borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontWeight: 700 }}>🗑</button>
         </div>
       </div>
+      {openInfo && <InfoPanel orgId={o.id} onSaved={(nm) => { setName(nm); onChange({ ...o, name: nm }); }} />}
       {open && <MembersPanel orgId={o.id} />}
     </div>
   );
